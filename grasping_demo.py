@@ -24,6 +24,10 @@ from utils.data.camera_data import CameraData
 from utils.visualisation.plot import save_results, plot_results
 from utils.dataset_processing.grasp import detect_grasps
 
+RECORD_ROBOT = True  # Record the robot pose on disk
+RECORD_CAMERA = True  # Record the camera image on disk
+RECORD_FOLDER = 'Grasping_Demo_Data'
+
 ROBOT_IP = '192.168.12.21'
 HANDEYE_CHESS_SIZE = (5, 7)  # X/Y
 HANDEYE_SQUARE_SIZE = 33  # mm
@@ -100,25 +104,25 @@ def find_charucoboard(img, mtx, dist, chess_size, squares_edge, markers_edge, pr
 
 def runmain():
 
+    rtde_r = rtde_receive.RTDEReceiveInterface(ROBOT_IP)
+    actual_joints = rtde_r.getActualQ()
+    actual_tcp = rtde_r.getActualTCPPose()
+    print('current tcp:', actual_tcp)
+    print('current joints:', actual_joints)
+
     # load calibration params
     with open('cam_params_calibrated.json', 'r') as f:
         cam_params = json.load(f)
     T_cam2gripper = np.array(cam_params['T_cam2gripper'])
 
     rtde_c = rtde_control.RTDEControlInterface(ROBOT_IP)
-    rtde_c.moveL(positions[0], 0.05, 0.01)
+    rtde_c.moveL(positions[0], 0.3, 0.01)
     gripper = RobotiqGripper(rtde_c)
     gripper.activate()
     gripper.set_force(5)  # from 0 to 100 %
     gripper.set_speed(100)
     gripper.open()
 
-    rtde_r = rtde_receive.RTDEReceiveInterface(ROBOT_IP)
-    actual_joints = rtde_r.getActualQ()
-    actual_tcp = rtde_r.getActualTCPPose()
-
-    print('current tcp:', actual_tcp)
-    print('current joints:', actual_joints)
 
     # camera init 
     cam = RealSenseCamera(device_id='f1270625')
@@ -130,6 +134,17 @@ def runmain():
     net = torch.load(NETWORK_PATH)
     print('Done')
     device = get_device(force_cpu=False)
+
+    # Retrieve the folder to save the data
+    record_folder = Path('./') / RECORD_FOLDER
+    record_folder.mkdir(exist_ok=True, parents=True)
+
+    # This script does not delete the previous run if the folder is not empty
+    # If the folder is not empty, retrieve the next ID
+    id = 0
+    ids = sorted([int(x.stem) for x in record_folder.glob('*.png') if x.stem.isdigit()])
+    if ids:
+        id = ids[-1] + 1
 
     fig = plt.figure(figsize=(10, 10))
     while True:
@@ -159,6 +174,18 @@ def runmain():
         if key == ord('q'):
             break
         if key == ord('s'):
+            img_filename = f'{record_folder.as_posix()}/{id}.jpg'
+            depth_filename = f'{record_folder.as_posix()}/{id}.png'
+            depth_recolor_filename = f'{record_folder.as_posix()}/{id}_recolor.jpg'
+            
+            # record_camera(CAMERA_TYPE, camera_handle, img_filename.as_posix())
+            cv2.imwrite(img_filename, color_image)
+            cv2.imwrite(depth_filename, depth_image)
+            cv2.imwrite(depth_recolor_filename, depth_colormap)
+
+            print('save ID: ', id)
+            id += 1
+
             rgb = image_bundle['rgb']
             depth = image_bundle['aligned_depth']
             x, depth_img, rgb_img = cam_data.get_data(rgb=rgb, depth=depth)
@@ -182,12 +209,12 @@ def runmain():
             
             grasp_center = np.array(grasps[0].center)
             
-            grasp_center[0] = grasp_center[0]/224.0*1080 #+ cam_data.top_left[0]
-            grasp_center[1] = grasp_center[1]/224.0*1920 #+ cam_data.top_left[1]
+            grasp_center[0] = grasp_center[0]/224.0*1080 + cam_data.top_left[0]
+            grasp_center[1] = grasp_center[1]/224.0*1080 + cam_data.top_left[1]
             grasp_angle = grasps[0].angle
             
             # Get grasp position from model output
-            pos_z = cam.get_dist(grasp_center[1], grasp_center[0]) + 0.04
+            pos_z = 0.595 + 0.015 #cam.get_dist(grasp_center[1], grasp_center[0]) + 0.02
             
             pos_x = np.multiply(grasp_center[1] - cam.intrinsics.ppx,
                                 pos_z / cam.intrinsics.fx)
