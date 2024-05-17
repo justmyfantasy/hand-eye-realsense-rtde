@@ -179,10 +179,13 @@ def runmain():
                 if draw_img is not None:
                     cv.imshow('det', draw_img)
                     key = cv2.waitKey()
+                
             except:
-                print(f'Unable to find chessboard in {i}!')
+                print(f'Unable to find chessboard in image!')
                 continue
 
+            print('R_target2cam:', R_target2cam)
+            print('t_target2cam:', t_target2cam)
             T_target2cam = np.concatenate((R_target2cam, t_target2cam/1000), axis=1)
             T_target2cam = np.concatenate((T_target2cam, np.array([[0,0,0,1]])), axis=0)
 
